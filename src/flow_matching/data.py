@@ -209,3 +209,48 @@ class UnitDataset(torch.utils.data.Dataset):
             "names": names,
             "input_values": input_values,
         }
+
+
+class LibriLight(torch.utils.data.Dataset):
+    def __init__(
+        self,
+        file,
+        frames_per_seg: Optional[int] = None,
+    ):
+        self.input_ids = []
+        self.paths = []
+
+        with open(file) as f:
+            dataset = json.load(f)
+
+        for path, units in tqdm(dataset.items()):
+            input_ids = torch.tensor(units) + 1  # 0: pad
+
+            self.input_ids.append(input_ids)
+            self.paths.append(path)
+
+        self.frames_per_seg = frames_per_seg
+        self.segment_size = (frames_per_seg - 1) * 320 + 400
+
+    def __len__(self):
+        return len(self.input_ids)
+
+    def __getitem__(self, n: int) -> Dict[str, torch.Tensor]:
+        input_ids = self.input_ids[n]
+        path = self.paths[n]
+
+        input_values, sr = torchaudio.load(path)
+        input_values = input_values.squeeze(0)  # (len,)
+
+        diff = len(input_ids) - self.frames_per_seg
+        if diff < 0:
+            input_ids = torch.nn.functional.pad(input_ids, (0, -diff))
+
+        diff = len(input_values) - self.segment_size
+        if diff < 0:
+            input_values = torch.nn.functional.pad(input_values, (0, -diff))
+
+        return {
+            "input_ids": input_ids,
+            "input_values": input_values,
+        }

@@ -98,3 +98,42 @@ def extract_features(config):
         spectrogram_labels = spectrogram_labels.cpu()
 
         torch.save(spectrogram_labels, spectrogram_path)
+
+
+def tokenize_librilight(config):
+    wav_dir = Path(config.dataset.wav_dir)
+    wav_dir_orig = Path(config.dataset.wav_dir_orig)
+
+    paths = wav_dir_orig.glob("**/*" + config.dataset.ext_audio)
+    paths = list(paths)
+
+    encoder = load_encoder(
+        config.flow_matching.dense_model_name,
+        config.flow_matching.quantizer_model_name,
+        config.flow_matching.vocab_size,
+        config.flow_matching.predict_duration,
+    )
+
+    dataset = dict()
+
+    for path in tqdm(paths):
+        wav, sr = torchaudio.load(path)
+        wavs = torch.split(wav, 400080, dim=1)
+        name = path.relative_to(wav_dir_orig).with_suffix("")
+
+        for idx, wav in enumerate(wavs):
+            path = wav_dir / f"{name}_{idx:04}{config.dataset.ext_audio}"
+            path.parent.mkdir(exist_ok=True, parents=True)
+            path = str(path)
+            torchaudio.save(path, wav, sr)
+
+            try:
+                outputs = encoder(wav.cuda())
+                units = outputs["units"].tolist()
+
+                dataset[path] = units
+            except RuntimeError:
+                pass
+
+    with open(config.dataset.train_file, "w") as f:
+        json.dump(dataset, f)

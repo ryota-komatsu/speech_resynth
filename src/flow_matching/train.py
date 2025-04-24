@@ -11,11 +11,12 @@ from transformers import AutoConfig, AutoModel, FastSpeech2ConformerHifiGan, Fas
 
 from ..bigvgan.bigvgan import BigVGan, BigVGanConfig
 from .configs import ConditionalFlowMatchingConfig
-from .data import UnitDataset
+from .data import LibriLight, UnitDataset
 from .models import ConditionalFlowMatchingModel
 from .utils.misc import fix_random_seed, get_lr_schedule
 from .utils.phi.normalizer import EnglishTextNormalizer
 from .utils.phi.run_eval import Phi4MultimodalAudioModel
+from .utils.spectrogram import mel_spectrogram
 from .utils.textless import embedding
 
 sys.path.append("src/utmos")
@@ -103,28 +104,32 @@ def validate(config, dataloader, model: ConditionalFlowMatchingModel, step: int,
 def train_flow_matching(config):
     fix_random_seed(config.common.seed)
 
-    train_set = UnitDataset(
+    train_set = LibriLight(
         config.dataset.train_file,
-        spectrogram_dir=config.dataset.spectrogram_dir,
         frames_per_seg=config.flow_matching.frames_per_seg,
-        ext_audio=config.dataset.ext_audio,
     )
-    dev_set = UnitDataset(
-        config.dataset.dev_file,
-        config.dataset.wav_dir,
-        ext_audio=config.dataset.ext_audio,
-    )
+    # train_set = UnitDataset(
+    #     config.dataset.train_file,
+    #     spectrogram_dir=config.dataset.spectrogram_dir,
+    #     frames_per_seg=config.flow_matching.frames_per_seg,
+    #     ext_audio=config.dataset.ext_audio,
+    # )
+    # dev_set = UnitDataset(
+    #    config.dataset.dev_file,
+    #    config.dataset.wav_dir,
+    #    ext_audio=config.dataset.ext_audio,
+    # )
     train_loader = torch.utils.data.DataLoader(
         train_set,
         batch_size=config.flow_matching.batch_size,
         shuffle=True,
         num_workers=config.flow_matching.num_workers,
-        collate_fn=UnitDataset.collate_fn,
+        # collate_fn=UnitDataset.collate_fn,
     )
-    dev_loader = torch.utils.data.DataLoader(
-        dev_set,
-        num_workers=config.flow_matching.num_workers,
-    )
+    # dev_loader = torch.utils.data.DataLoader(
+    #    dev_set,
+    #    num_workers=config.flow_matching.num_workers,
+    # )
 
     model = ConditionalFlowMatchingModel(
         ConditionalFlowMatchingConfig(
@@ -151,7 +156,7 @@ def train_flow_matching(config):
         ),
     ).cuda()
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.flow_matching.lr, betas=(0.9, 0.98), eps=1e-9)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.flow_matching.lr, betas=(0.9, 0.98))
 
     # learning rate scheduler
     lr_scheduler = get_lr_schedule(
@@ -173,6 +178,10 @@ def train_flow_matching(config):
 
         for batch in train_loader:
             with torch.amp.autocast("cuda", dtype=torch.bfloat16):
+                spectrogram_labels = mel_spectrogram(batch["input_values"].cuda())
+                spectrogram_labels = spectrogram_labels.transpose(1, 2)
+                spectrogram_labels[batch["input_ids"].eq(0)] = -100
+
                 loss = model(
                     input_ids=batch["input_ids"].cuda(),
                     spectrogram_labels=batch["spectrogram_labels"].cuda(),
@@ -205,7 +214,7 @@ def train_flow_matching(config):
                     writer.add_scalar("train/grad_norm", grad_norm.item(), step)
 
         if epoch % config.flow_matching.save_interval_epoch == 0:
-            validate(config, dev_loader, model, step, writer)
+            # validate(config, dev_loader, model, step, writer)
 
             # save model
             Path(config.flow_matching.path).parent.mkdir(parents=True, exist_ok=True)

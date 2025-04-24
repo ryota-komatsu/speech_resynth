@@ -1,0 +1,112 @@
+common:
+  seed: 0
+
+dataset:
+  wav_dir: "data/librilight_25s"
+  wav_dir_orig: "data/librilight"
+  ext_audio: ".flac"
+  train_file: "data/resynth/train.json"
+
+synthesis:
+  src_dir: ${dataset.wav_dir}
+  tgt_dir: ${dataset.wav_dir}_resynth
+  split: "test-*"
+  ext_audio: ${dataset.ext_audio}
+
+eval:
+  result_path: "results/resynth/score.csv"
+
+flow_matching:
+  path: "models/flow_matching"
+  batch_size: 216 # work with single 24GB VRAM GPU
+  frames_per_seg: 1250  # 25 seconds
+  num_workers: 16
+  epoch: 5
+  warmup_steps: 1000
+  lr: 0.001
+  lr_min: 0.0001
+  max_norm: 0.1
+  summary_interval: 100
+  save_interval_epoch: 1
+
+  # inference
+  dt: 0.0625
+  truncation_value: 1.0  # truncation trick (https://arxiv.org/abs/1809.11096)
+
+  # textless.data.speech_encoder.SpeechEncoder
+  dense_model_name: "mhubert-base-vp_mls_cv_8lang"
+  quantizer_model_name: "kmeans-expresso"
+  vocab_size: 2000
+
+  # src.flow_matching.configs.ConditionalFlowMatchingConfig
+  dim_in: 80
+  dim_cond_emb: 768
+  hidden_size: 256
+  depth: 4
+  heads: 2
+  intermediate_size: 768
+  attn_dropout: 0.0
+  ff_dropout: 0.0
+  use_unet_skip_connection: false
+  conv_pos_embed_kernel_size: 31
+  conv_pos_embed_groups: 256
+  mean: -5.8843  # mean of log mel-spectrogram
+  std: 2.2615  # std of log mel-spectrogram
+  predict_duration: false
+
+vocoder:
+  path: "models/bigvgan"
+  batch_size: 20
+  segment_size: 16080
+  num_workers: 20
+  training_epochs: 57  # 1M steps
+  total_steps: 1000000
+
+  num_gpus: 1
+  learning_rate: 0.0001
+  adam_b1: 0.8
+  adam_b2: 0.99
+  lr_decay: 0.9999996
+  seed: 1234
+
+  model_in_dim: 80
+  upsample_rates: [5, 4, 4, 2, 2]
+  upsample_kernel_sizes: [10, 9, 8, 4, 4]
+  upsample_initial_channel: 512
+  resblock_kernel_sizes: [3,7,11]
+  resblock_dilation_sizes: [[1,3,5], [1,3,5], [1,3,5]]
+
+  use_tanh_at_final: false
+  use_bias_at_final: false
+
+  activation: "snakebeta"
+  snake_logscale: true
+
+  mpd_reshapes: [2, 3, 5, 7, 11]
+  use_spectral_norm: false
+  discriminator_channel_mult: 1
+  
+  use_multiscale_melloss: true
+  lambda_melloss: 15
+
+  clip_grad_norm: 100
+
+  n_fft: 400  # HuBERT
+  hop_size: 320  # HuBERT
+
+  dist_config:
+    dist_backend: "nccl"
+    dist_url: "tcp://localhost:54321"
+    world_size: 1
+
+  stdout_interval: 1000
+  summary_interval: 1000
+  checkpoint_interval: 10000
+  validation_interval: 10000
+
+flow_matching_with_vocoder:
+  name: "ryota-komatsu/flow_matching_with_bigvgan"
+  batch_size: 8
+
+asr:
+  name: "microsoft/Phi-4-multimodal-instruct"
